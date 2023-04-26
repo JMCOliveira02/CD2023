@@ -31,7 +31,7 @@ int main(int argc, char **argv)
         ((strcmp("/dev/ttyS10", argv[1]) != 0) &&
          (strcmp("/dev/ttyS11", argv[1]) != 0)))
     {
-        printf("Usage:\t./noncanonical_all SerialPort \n\t\t\t\t/dev/ttyS10 transmitter\n\t\t\t\t/dev/ttyS11 receiver\n\n");
+        printf("Usage:\t./noncanonical_all SerialPort \n\t\t\t\t/dev/ttyS10 -> transmitter\n\t\t\t\t/dev/ttyS11 -> receiver\n\n");
         exit(1);
     }
 
@@ -81,12 +81,12 @@ int main(int argc, char **argv)
 
     printf("New termios structure set\n");
 
-    if (strcmp(argv[1], "/dev/ttyS10") == 0)
+    if (!strcmp(argv[1], "/dev/ttyS10"))
     {
         get_send_confirm(fd, oldtio);
     }
 
-    if (strcmp(argv[1], "/dev/ttyS11") == 0)
+    if (!strcmp(argv[1], "/dev/ttyS11"))
     {
         read_respond(fd, oldtio);
     }
