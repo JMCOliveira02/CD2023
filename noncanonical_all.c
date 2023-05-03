@@ -9,7 +9,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
-#include <time.h>
 
 // #define CASA
 
@@ -41,7 +40,6 @@ const char UA[5] = {F, A, C_UA, Bcc, F};
 
 int fd;
 int conta = 0, flag = 1;
-time_t Start_time, current_time;
 
 RCV_SET_state current_state = Start;
 
@@ -319,7 +317,7 @@ void escreve()
 
     write(fd, SET, 5);
 
-    if (conta < 5)
+    if (conta < 3)
     {
         alarm(3);
     }
@@ -328,7 +326,6 @@ void escreve()
         printf("Não foi possível estabelecer conexão com Receiver!\n\n");
         exit(-1);
     }
-    // printf("escreve\n");
 
     if (conta == 0)
     {
@@ -352,18 +349,9 @@ int send_SET_wait_UA()
 
     while (1)
     {
-        // printf("flag: %d\n", flag);
-        /* if (flag)
-        {
-            flag = 0;
-            printf("\nagenda escreve\n");
-            alarm(3); // chama escreve() a cada 3s sem receber UA
-        } */
-        // printf("antes read\n");
         read(fd, buf, 1);
-        // printf("depois read\n");
         maquina(buf, UA);
-        // printf("depois maquina\n");
+
         if (current_state == Stop)
         {
             printf("UA recebido!\n");
