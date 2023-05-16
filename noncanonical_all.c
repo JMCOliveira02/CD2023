@@ -34,9 +34,16 @@ const char F = 0x5C;
 const char A = 0x01;
 const char C_SET = 0x03;
 const char C_UA = 0x05;
-const char Bcc = A ^ C_UA;
-const char SET[5] = {F, A, C_SET, Bcc, F};
-const char UA[5] = {F, A, C_UA, Bcc, F};
+const char C_DISC = 0x0B;
+const char Bcc_SET = A ^ C_SET;
+const char Bcc_UA = A ^ C_UA;
+const char Bcc_DISC = A ^ C_DISC;
+
+const char SET[5] = {F, A, C_SET, Bcc_SET, F};
+const char UA[5] = {F, A, C_UA, Bcc_UA, F};
+const char DISC[5] = {F, A, C_DISC, Bcc_DISC, F};
+
+struct termios oldtio, newtio;
 
 int fd;
 int conta = 0, flag = 1;
@@ -44,16 +51,20 @@ int conta = 0, flag = 1;
 RCV_SET_state current_state = Start;
 
 int menu();
-int llopen(int receiver);
+int llopen(char *porta, int receiver);
 void get_send_confirm(struct termios oldtio);
 void read_respond(struct termios oldtio);
 void maquina(unsigned char *buf, const char *Frame);
+void escreve();
+int send_SET_wait_UA();
+void read_SET_send_UA();
+int llopen(char *porta, int receiver);
+int llclose(char *porta, int receiver);
 
 int main(int argc, char **argv)
 {
     int c, res;
-    struct termios oldtio, newtio;
-    int i, sum = 0, speed = 0;
+    int i;
 
 #ifdef CASA
     if ((argc < 2) ||
@@ -75,60 +86,25 @@ int main(int argc, char **argv)
 
     int r = menu();
 
-    /*
-    Open serial port device for reading and writing and not as controlling tty
-    because we don't want to get killed if linenoise sends CTRL-C.
-    */
+    int connection = llopen(argv[1], r); // 0 for transmitter, 1 for receiver
 
-    fd = open(argv[1], O_RDWR | O_NOCTTY);
-    if (fd < 0)
+    if (connection == 0 && !r)
     {
-        perror(argv[1]);
+        printf("Não foi possível estabelecer conexão com Receiver!\n\n");
         exit(-1);
     }
 
-    if (tcgetattr(fd, &oldtio) == -1)
-    { /* save current port settings */
-        perror("tcgetattr");
-        exit(-1);
-    }
-
-    bzero(&newtio, sizeof(newtio));
-    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
-    newtio.c_iflag = IGNPAR;
-    newtio.c_oflag = 0;
-
-    /* set input mode (non-canonical, no echo,...) */
-    newtio.c_lflag = 0;
-
-    newtio.c_cc[VTIME] = 0; /* inter-character timer unused */
-    newtio.c_cc[VMIN] = 1;  /* blocking read until 5 chars received */
-
-    /*
-    VTIME e VMIN devem ser alterados de forma a proteger com um temporizador a
-    leitura do(s) próximo(s) caracter(es)
-    */
-
-    tcflush(fd, TCIOFLUSH);
-
-    sleep(1);
-
-    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
+    if (r)
     {
-        perror("tcsetattr");
-        exit(-1);
-    }
-
-    printf("New termios structure set\n");
-
-    if (!r)
-    {
-        get_send_confirm(oldtio);
+        read_respond(oldtio);
+        llclose(argv[1], r);
     }
     else
     {
-        read_respond(oldtio);
+        get_send_confirm(oldtio);
+        llclose(argv[1], r);
     }
+
     return 0;
 }
 
@@ -153,15 +129,6 @@ int menu()
 
 void get_send_confirm(struct termios oldtio)
 {
-
-    int connection = llopen(0); // 0 for transmitter, 1 for receiver
-
-    if (connection == 0)
-    {
-        printf("Não foi possível estabelecer conexão com o Receiver!\n\n");
-        exit(-1);
-    }
-
     char buf[255], buf2[255];
     printf("\n------Transmitter mode------\n\nWrite message to send: ");
 
@@ -178,6 +145,7 @@ void get_send_confirm(struct termios oldtio)
         buf2[res] = 0;           /* so we can printf... */
         printf("{ %s } %d bytes read\n", buf2, res);
         strcat(aux, buf2);
+
         for (int i = 0; i < 8; i++)
         {
             if (buf2[i] == '\0')
@@ -193,25 +161,15 @@ void get_send_confirm(struct termios oldtio)
         printf("%s ==> %s\n", aux, "GREAT SUCCESS! NO ERRORS\n");
     }
 
-    /*
-    O ciclo FOR e as instruções seguintes devem ser alterados de modo a respeitar
-    o indicado no guião
-    */
-
     if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
     {
         perror("tcsetattr");
         exit(-1);
     }
-
-    close(fd);
 }
 
 void read_respond(struct termios oldtio)
 {
-
-    int connection = llopen(1); // 0 for transmitter, 1 for receiver
-
     unsigned char aux[255] = "";
     char buf[255];
 
@@ -234,15 +192,9 @@ void read_respond(struct termios oldtio)
     printf("Received message: ");
     printf("%s\n", aux);
     sleep(1);
-    // aux[strlen(aux) - 1] = '\0';
     write(fd, aux, 255);
 
-    /*
-    O ciclo WHILE deve ser alterado de modo a respeitar o indicado no guião
-    */
-
     tcsetattr(fd, TCSANOW, &oldtio);
-    close(fd);
 }
 
 void maquina(unsigned char *buf, const char *Frame)
@@ -382,8 +334,43 @@ void read_SET_send_UA()
     write(fd, UA, 5);
 }
 
-int llopen(int receiver)
+int llopen(char *porta, int receiver)
 {
+    fd = open(porta, O_RDWR | O_NOCTTY);
+    if (fd < 0)
+    {
+        perror(porta);
+        exit(-1);
+    }
+
+    if (tcgetattr(fd, &oldtio) == -1)
+    {
+        perror("tcgetattr");
+        exit(-1);
+    }
+
+    bzero(&newtio, sizeof(newtio));
+    newtio.c_cflag = BAUDRATE | CS8 | CLOCAL | CREAD;
+    newtio.c_iflag = IGNPAR;
+    newtio.c_oflag = 0;
+
+    /* set input mode (non-canonical, no echo,...) */
+    newtio.c_lflag = 0;
+
+    newtio.c_cc[VTIME] = 0; /* inter-character timer unused */
+    newtio.c_cc[VMIN] = 1;  /* blocking read until 5 chars received */
+
+    tcflush(fd, TCIOFLUSH);
+
+    sleep(1);
+
+    if (tcsetattr(fd, TCSANOW, &newtio) == -1)
+    {
+        perror("tcsetattr");
+        exit(-1);
+    }
+
+    printf("New termios structure set\n");
     if (receiver)
     {
         read_SET_send_UA();
@@ -393,5 +380,61 @@ int llopen(int receiver)
         return send_SET_wait_UA();
     }
 
-    return 0;
+    return 1;
+}
+
+int llclose(char *porta, int receiver)
+{
+    if (receiver)
+    {
+        unsigned char buf[1];
+
+        printf("Espera por DISC...\n");
+
+        while (current_state != Stop)
+        {
+            read(fd, buf, 1);
+            maquina(buf, DISC);
+        }
+
+        printf("DISC recebido! A enviar DISC...\n");
+
+        current_state = Start;
+        write(fd, DISC, 5);
+
+        printf("DISC enviado! Espera por UA...\n");
+
+        while (current_state != Stop)
+        {
+            read(fd, buf, 1);
+            maquina(buf, UA);
+        }
+
+        current_state = Start;
+
+        printf("UA recebido!\n A fechar conexão\n");
+        close(fd);
+        exit(-1);
+    }
+    else
+    {
+        char buf[1];
+
+        write(fd, DISC, 5);
+
+        printf("DISC enviado! Espera por DISC...\n");
+
+        while (current_state != Stop)
+        {
+            read(fd, buf, 1);
+            maquina(buf, DISC);
+        }
+        current_state = Start;
+
+        printf("DISC recebido!\n A enviar UA e fechar conexão\n");
+
+        write(fd, UA, 5);
+        close(fd);
+        exit(-1);
+    }
 }
