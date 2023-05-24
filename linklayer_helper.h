@@ -12,8 +12,10 @@
 
 struct termios oldtio, newtio;
 
+//tempo
 struct timeval inicio, fim;
-double t_transf; 
+double t_transf;
+//
 
 typedef struct linkLayer
 {
@@ -76,8 +78,6 @@ typedef enum
     Stop_RR1
 } RCV_RR_state;
 
-
-
 typedef enum
 {
     set,
@@ -132,10 +132,6 @@ int nbytes = 0;
 int prev_S = 1, cur_S;
 int rcv_RR;
 bool sent_RR = 0;
-
-const int FER = 10;
-int NER = 100/FER;
-int a = 1;
 
 unsigned char buf_aux[2 * MAX_PAYLOAD_SIZE + 1];
 unsigned char message[2 * MAX_PAYLOAD_SIZE + 6];
@@ -454,7 +450,7 @@ void escreve()
         write(fd, DISC, length_escreve);
 
         if (show)
-            printf("DISC enviado! Espera por DISC...\n");
+            printf("\nDISC enviado! Espera por DISC...\n");
 
         if (conta < num_tries)
         {

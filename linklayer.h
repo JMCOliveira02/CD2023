@@ -13,7 +13,6 @@
 #include <string.h>
 #include <stdbool.h>
 
- 
 // Opens a connection using the "port" parameters defined in struct linkLayer, returns "-1" on error and "1" on sucess
 int llopen(linkLayer connectionParameters);
 // Sends data in buf with size bufSize
@@ -70,11 +69,10 @@ int llopen(linkLayer connectionParameters)
     }
     else
     {
+        gettimeofday(&inicio, NULL);
         return send_SET_wait_UA();
     }
-    
-    gettimeofday(&inicio, NULL);
-    
+   
     return 1;
 }
 
@@ -94,7 +92,7 @@ int llwrite(char *buffer, int length)
             i_aux++;
         }
         else
-        { // Destuffing e cálculo do Bcc2
+        { 
             buf_aux[i_aux] = buffer[i];
             i_aux++;
         }
@@ -149,10 +147,8 @@ int llwrite(char *buffer, int length)
         else
         {
             sent_RR = rcv_RR;
-            // alarm(0);
             flag = msg;
             length_escreve = length_final;
-            // escreve();
         }
     }
 
@@ -160,6 +156,7 @@ int llwrite(char *buffer, int length)
     alarm(0);
     conta = 0;
     Bcc_I2 = 0x00;
+    usleep(100);
     return length_aux;
 }
 
@@ -168,6 +165,7 @@ int llread(char *packet)
     int i_b1 = 0;
     unsigned char buf;
     char Bcc_teste = 0x00;
+    
 
     while (1)
     {
@@ -234,19 +232,17 @@ int llread(char *packet)
             }
         }
 
-        if (Bcc_teste == 0x00 && a < NER)
+        if (Bcc_teste == 0x00)
         {
             printf("Bcc verificou\nA enviar RR(%d)...\n", prev_S);
             write(fd, RR[prev_S], 5);
+            
             break;
         }
         else
         {
-            a=1;
             printf("Bcc não verificou\nA enviar RR(%d)...\n", cur_S);
             write(fd, RR[cur_S], 5);
-            Bcc_teste = 0x00;
-            i_b1 = 0;
             continue;
         }
     }
@@ -254,8 +250,7 @@ int llread(char *packet)
     nbytes = i_b1 - 1;
     prev_S = cur_S;
     memcpy(packet, buffer1, nbytes);
-    a++;
-    usleep(
+    
     return nbytes;
 }
 
@@ -294,11 +289,7 @@ int llclose(linkLayer connectionParameters, int showStatistics)
         current_state = Start;
 
         if (show)
-        {    t_transf = (fim.tv_sec-inicio.tv_sec)*1000;
-             t_transf += (fim.tv_usec-inicio.tv_usec)/1000;
-            
-            printf("UA recebido!\n\nA fechar conexão\n\nTransferência levou %.2f milissegundos\n", t_transf);
-        }
+            printf("UA recebido!\n A fechar conexão\n");
         close(fd);
         exit(-1);
     }
@@ -319,7 +310,11 @@ int llclose(linkLayer connectionParameters, int showStatistics)
         current_state = Start;
 
         if (show)
-            printf("DISC recebido!\n A enviar UA e fechar conexão\n");
+        {
+            t_transf = (fim.tv_sec - inicio.tv_sec) * 1000;
+            t_transf += (fim.tv_usec - inicio.tv_usec) / 1000;
+            printf("DISC recebido!\n\nA enviar UA e fechar conexão\n\nTransferencia levou %.2f milissegundos\n", t_transf);
+        }
 
         write(fd, UA, 5);
         close(fd);
