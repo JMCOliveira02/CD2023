@@ -8,8 +8,12 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdbool.h>
+#include <sys/time.h>
 
 struct termios oldtio, newtio;
+
+struct timeval inicio, fim;
+double t_transf; 
 
 typedef struct linkLayer
 {
@@ -26,7 +30,7 @@ typedef struct linkLayer
 #define RECEIVER 1
 
 // SIZE of maximum acceptable payload; maximum number of bytes that application layer should send to link layer
-#define MAX_PAYLOAD_SIZE 400
+#define MAX_PAYLOAD_SIZE 1000
 
 // CONNECTION deafault values
 #define BAUDRATE_DEFAULT B38400
@@ -71,6 +75,8 @@ typedef enum
     Stop_RR0,
     Stop_RR1
 } RCV_RR_state;
+
+
 
 typedef enum
 {
@@ -126,6 +132,10 @@ int nbytes = 0;
 int prev_S = 1, cur_S;
 int rcv_RR;
 bool sent_RR = 0;
+
+const int FER = 10;
+int NER = 100/FER;
+int a = 1;
 
 unsigned char buf_aux[2 * MAX_PAYLOAD_SIZE + 1];
 unsigned char message[2 * MAX_PAYLOAD_SIZE + 6];

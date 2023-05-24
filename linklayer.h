@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdbool.h>
 
+ 
 // Opens a connection using the "port" parameters defined in struct linkLayer, returns "-1" on error and "1" on sucess
 int llopen(linkLayer connectionParameters);
 // Sends data in buf with size bufSize
@@ -42,7 +43,7 @@ int llopen(linkLayer connectionParameters)
     }
 
     bzero(&newtio, sizeof(newtio));
-    newtio.c_cflag = BAUDRATE_DEFAULT | CS8 | CLOCAL | CREAD;
+    newtio.c_cflag = connectionParameters.baudRate | CS8 | CLOCAL | CREAD;
     newtio.c_iflag = IGNPAR;
     newtio.c_oflag = 0;
 
@@ -71,7 +72,9 @@ int llopen(linkLayer connectionParameters)
     {
         return send_SET_wait_UA();
     }
-
+    
+    gettimeofday(&inicio, NULL);
+    
     return 1;
 }
 
@@ -231,7 +234,7 @@ int llread(char *packet)
             }
         }
 
-        if (Bcc_teste == 0x00)
+        if (Bcc_teste == 0x00 && a < NER)
         {
             printf("Bcc verificou\nA enviar RR(%d)...\n", prev_S);
             write(fd, RR[prev_S], 5);
@@ -239,8 +242,11 @@ int llread(char *packet)
         }
         else
         {
+            a=1;
             printf("Bcc não verificou\nA enviar RR(%d)...\n", cur_S);
             write(fd, RR[cur_S], 5);
+            Bcc_teste = 0x00;
+            i_b1 = 0;
             continue;
         }
     }
@@ -248,12 +254,14 @@ int llread(char *packet)
     nbytes = i_b1 - 1;
     prev_S = cur_S;
     memcpy(packet, buffer1, nbytes);
-
+    a++;
+    usleep(
     return nbytes;
 }
 
 int llclose(linkLayer connectionParameters, int showStatistics)
 {
+    gettimeofday(&fim, NULL);
     show = showStatistics;
     if (connectionParameters.role)
     {
@@ -286,7 +294,11 @@ int llclose(linkLayer connectionParameters, int showStatistics)
         current_state = Start;
 
         if (show)
-            printf("UA recebido!\n A fechar conexão\n");
+        {    t_transf = (fim.tv_sec-inicio.tv_sec)*1000;
+             t_transf += (fim.tv_usec-inicio.tv_usec)/1000;
+            
+            printf("UA recebido!\n\nA fechar conexão\n\nTransferência levou %.2f milissegundos\n", t_transf);
+        }
         close(fd);
         exit(-1);
     }
