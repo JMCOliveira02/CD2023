@@ -69,10 +69,12 @@ int llopen(linkLayer connectionParameters)
     }
     else
     {
+        int b = send_SET_wait_UA();
         gettimeofday(&inicio, NULL);
-        return send_SET_wait_UA();
+        return b;
     }
-   
+
+    gettimeofday(&inicio, NULL);
     return 1;
 }
 
@@ -92,7 +94,7 @@ int llwrite(char *buffer, int length)
             i_aux++;
         }
         else
-        { 
+        {
             buf_aux[i_aux] = buffer[i];
             i_aux++;
         }
@@ -120,35 +122,50 @@ int llwrite(char *buffer, int length)
     escreve();
 
     char buf;
-    current_state_RR = Start_RR;
+    current_state_R = Start_R;
 
     while (1) // ciclo para calcular N(R) na trama
     {
         read(fd, &buf, 1);
-        maquina_RR(buf);
+        maquina_R(buf);
 
-        if (current_state_RR == Stop_RR0)
+        if (current_state_R == Stop_RR0)
         {
             printf("RR recebido (RR=0)\n");
             rcv_RR = 0;
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
+            if (rcv_RR != sent_RR)
+            {
+                break;
+            }
         }
-        if (current_state_RR == Stop_RR1)
+        if (current_state_R == Stop_RR1)
         {
             printf("RR recebido (RR=1)\n");
             rcv_RR = 1;
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
+            if (rcv_RR != sent_RR)
+            {
+                break;
+            }
         }
-
-        if (rcv_RR != sent_RR)
+        if (current_state_R == Stop_REJ0)
         {
-            break;
+            printf("REJ recebido (REJ=0)\n");
+            current_state_R = Start_R;
+            alarm(0);
+            conta--;
+            escreve();
+            continue;
         }
-        else
+        if (current_state_R == Stop_REJ1)
         {
-            sent_RR = rcv_RR;
-            flag = msg;
-            length_escreve = length_final;
+            printf("REJ recebido (REJ=1)\n");
+            current_state_R = Start_R;
+            alarm(0);
+            conta--;
+            escreve();
+            continue;
         }
     }
 
@@ -156,7 +173,7 @@ int llwrite(char *buffer, int length)
     alarm(0);
     conta = 0;
     Bcc_I2 = 0x00;
-    usleep(100);
+    // usleep(distancia_km * 5); // distancia
     return length_aux;
 }
 
@@ -165,7 +182,6 @@ int llread(char *packet)
     int i_b1 = 0;
     unsigned char buf;
     char Bcc_teste = 0x00;
-    
 
     while (1)
     {
@@ -183,6 +199,7 @@ int llread(char *packet)
                 if (cur_S == prev_S)
                 {
                     printf("S errado, a enviar RR(1)\n");
+                    usleep(distancia_km * 5);
                     write(fd, RR_1, 5);
                     continue;
                 }
@@ -198,11 +215,19 @@ int llread(char *packet)
                 if (cur_S == prev_S)
                 {
                     printf("S errado, a enviar RR(0)\n");
+                    usleep(distancia_km * 5);
                     write(fd, RR_0, 5);
                     continue;
                 }
                 else
                     break;
+            }
+
+            if (current_state_I == WRONG_BCC)
+            {
+                printf("BCC errado, a enviar REJ(%d)\n", wrong_S);
+                usleep(distancia_km * 5);
+                write(fd, REJ[wrong_S], 5);
             }
         }
 
@@ -232,17 +257,21 @@ int llread(char *packet)
             }
         }
 
-        if (Bcc_teste == 0x00)
+        if (Bcc_teste == 0x00 && a < NER)
         {
             printf("Bcc verificou\nA enviar RR(%d)...\n", prev_S);
+            usleep(distancia_km * 5);
             write(fd, RR[prev_S], 5);
-            
             break;
         }
         else
         {
-            printf("Bcc não verificou\nA enviar RR(%d)...\n", cur_S);
-            write(fd, RR[cur_S], 5);
+            a = 1;
+            printf("Bcc não verificou\nA enviar REJ(%d)...\n", wrong_S);
+            usleep(distancia_km * 5);
+            write(fd, REJ[wrong_S], 5);
+            Bcc_teste = 0x00;
+            i_b1 = 0;
             continue;
         }
     }
@@ -250,7 +279,10 @@ int llread(char *packet)
     nbytes = i_b1 - 1;
     prev_S = cur_S;
     memcpy(packet, buffer1, nbytes);
-    
+
+    a++;
+    // usleep(distancia_km); // distancia
+
     return nbytes;
 }
 
@@ -262,8 +294,7 @@ int llclose(linkLayer connectionParameters, int showStatistics)
     {
         unsigned char buf;
 
-        if (show)
-            printf("\nEspera por DISC...\n");
+        printf("\nEspera por DISC...\n");
 
         while (current_state != Stop)
         {
@@ -271,14 +302,12 @@ int llclose(linkLayer connectionParameters, int showStatistics)
             maquina(buf, DISC);
         }
 
-        if (show)
-            printf("DISC recebido! A enviar DISC...\n");
+        printf("DISC recebido! A enviar DISC...\n");
 
         current_state = Start;
         write(fd, DISC, 5);
 
-        if (show)
-            printf("DISC enviado! Espera por UA...\n");
+        printf("DISC enviado! Espera por UA...\n");
 
         while (current_state != Stop)
         {
@@ -288,8 +317,13 @@ int llclose(linkLayer connectionParameters, int showStatistics)
 
         current_state = Start;
 
+        printf("UA recebido!\n A fechar conexão\n");
         if (show)
-            printf("UA recebido!\n A fechar conexão\n");
+        {
+            t_transf = (fim.tv_sec - inicio.tv_sec) * 1000;
+            t_transf += (fim.tv_usec - inicio.tv_usec) / 1000;
+            printf("Transferência levou %.2f milissegundos\n\n", t_transf);
+        }
         close(fd);
         exit(-1);
     }
@@ -309,12 +343,7 @@ int llclose(linkLayer connectionParameters, int showStatistics)
         alarm(0);
         current_state = Start;
 
-        if (show)
-        {
-            t_transf = (fim.tv_sec - inicio.tv_sec) * 1000;
-            t_transf += (fim.tv_usec - inicio.tv_usec) / 1000;
-            printf("DISC recebido!\n\nA enviar UA e fechar conexão\n\nTransferencia levou %.2f milissegundos\n", t_transf);
-        }
+        printf("DISC recebido!\n A enviar UA e fechar conexão\n");
 
         write(fd, UA, 5);
         close(fd);

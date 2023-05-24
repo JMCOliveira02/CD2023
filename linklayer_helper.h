@@ -12,10 +12,8 @@
 
 struct termios oldtio, newtio;
 
-//tempo
 struct timeval inicio, fim;
 double t_transf;
-//
 
 typedef struct linkLayer
 {
@@ -32,7 +30,7 @@ typedef struct linkLayer
 #define RECEIVER 1
 
 // SIZE of maximum acceptable payload; maximum number of bytes that application layer should send to link layer
-#define MAX_PAYLOAD_SIZE 1000
+#define MAX_PAYLOAD_SIZE 400
 
 // CONNECTION deafault values
 #define BAUDRATE_DEFAULT B38400
@@ -61,21 +59,30 @@ typedef enum
     A_RCV_I,
     C_RCV_I0,
     C_RCV_I1,
+    WRONG_BCC,
     Stop_I0,
     Stop_I1
 } RCV_I_state;
 
+int wrong_S;
+
 typedef enum
 {
-    Start_RR,
-    F_RCV_RR,
-    A_RCV_RR,
+    Start_R,
+    F_RCV_R,
+    A_RCV_R,
     C_RCV_RR0,
     C_RCV_RR1,
+    C_RCV_REJ0,
+    C_RCV_REJ1,
     BCC_RCV_RR0,
     BCC_RCV_RR1,
+    BCC_RCV_REJ0,
+    BCC_RCV_REJ1,
     Stop_RR0,
-    Stop_RR1
+    Stop_RR1,
+    Stop_REJ0,
+    Stop_REJ1
 } RCV_RR_state;
 
 typedef enum
@@ -87,7 +94,7 @@ typedef enum
 
 RCV_SET_state current_state = Start;
 RCV_I_state current_state_I = Start_I;
-RCV_RR_state current_state_RR = Start_RR;
+RCV_RR_state current_state_R = Start_R;
 flag_alarme flag = set;
 
 const char F = 0x5C;
@@ -103,21 +110,25 @@ char Bcc_I2 = 0x00;
 const char S_0 = 0x00;
 const char S_1 = 0x02;
 
-const char R_0 = 0x01;
-const char R_1 = 0x21;
+const char RR0 = 0x01;
+const char RR1 = 0x21;
 
-const char REJ_0 = 0x05;
-const char REJ_1 = 0x25;
+const char REJ0 = 0x05;
+const char REJ1 = 0x25;
 
 const char SET[5] = {F, A, C_SET, Bcc_SET, F};
 const char UA[5] = {F, A, C_UA, Bcc_UA, F};
 const char DISC[5] = {F, A, C_DISC, Bcc_DISC, F};
 
-const char RR_0[5] = {F, A, R_0, A ^ R_0, F};
-const char RR_1[5] = {F, A, R_1, A ^ R_1, F};
+const char RR_0[5] = {F, A, RR0, A ^ RR0, F};
+const char RR_1[5] = {F, A, RR1, A ^ RR1, F};
 
-char RR[2][5] = {{F, A, R_0, A ^ R_0, F},
-                 {F, A, R_1, A ^ R_1, F}};
+const char REJ_0[5] = {F, A, REJ0, A ^ REJ0, F};
+const char REJ_1[5] = {F, A, REJ1, A ^ REJ1, F};
+
+const char RR[2][5] = {{F, A, RR0, A ^ RR0, F}, {F, A, RR1, A ^ RR1, F}};
+
+const char REJ[2][5] = {{F, A, REJ0, A ^ REJ0, F}, {F, A, REJ1, A ^ REJ1, F}};
 
 const char I_0[5] = {F, A, S_0, A ^ S_0, F};
 const char I_1[5] = {F, A, S_1, A ^ S_1, F};
@@ -133,9 +144,15 @@ int prev_S = 1, cur_S;
 int rcv_RR;
 bool sent_RR = 0;
 
+const float FER = 0.00001;
+float NER = 100 / FER;
+int a = 1;
+
 unsigned char buf_aux[2 * MAX_PAYLOAD_SIZE + 1];
 unsigned char message[2 * MAX_PAYLOAD_SIZE + 6];
 unsigned char buffer1[2 * MAX_PAYLOAD_SIZE + 6];
+
+float distancia_km = 20000;
 
 int length_aux, length_final, length_escreve;
 
@@ -148,7 +165,7 @@ void maquina(unsigned char buf, const char *Frame);
 // Sends the requested message every "timeout" seconds and exits after "numTries" consecutive tries
 void escreve();
 void maquina_I(unsigned char buf);
-void maquina_RR(unsigned char buf);
+void maquina_R(unsigned char buf);
 void msg_final();
 int llwrite(char *buffer, int length);
 
@@ -261,127 +278,181 @@ void maquina_I(unsigned char buf)
         break;
 
     case C_RCV_I0:
-        if (buf == F)
-        {
-            current_state_I = F_RCV_I;
-        }
-        else if (buf == I_0[1] ^ I_0[2])
+        if (buf == I_0[1] ^ I_0[2])
         {
             current_state_I = Stop_I0;
         }
         else
         {
-            current_state_I = Start_I;
+            current_state_I = WRONG_BCC;
+            wrong_S = 0;
         }
         break;
 
     case C_RCV_I1:
-        if (buf == F)
-        {
-            current_state_I = F_RCV_I;
-        }
-        else if (buf == I_1[1] ^ I_1[2])
+        if (buf == I_1[1] ^ I_1[2])
         {
             current_state_I = Stop_I1;
         }
         else
         {
-            current_state_I = Start_I;
+            current_state_I = WRONG_BCC;
+            wrong_S = 1;
         }
         break;
     }
 }
 
-void maquina_RR(unsigned char buf)
+void maquina_R(unsigned char buf)
 {
-    switch (current_state_RR)
+    switch (current_state_R)
     {
-    case Start_RR:
+    case Start_R:
         if (buf == F)
         {
-            current_state_RR = F_RCV_RR;
+            current_state_R = F_RCV_R;
         }
         break;
 
-    case F_RCV_RR:
+    case F_RCV_R:
         if (buf == A)
         {
-            current_state_RR = A_RCV_RR;
+            current_state_R = A_RCV_R;
         }
         else if (buf != F)
         {
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
         }
         break;
 
-    case A_RCV_RR:
+    case A_RCV_R:
         if (buf == F)
         {
-            current_state_RR = F_RCV_RR;
+            current_state_R = F_RCV_R;
         }
         else if (buf == RR_0[2])
         {
-            current_state_RR = C_RCV_RR0;
+            current_state_R = C_RCV_RR0;
         }
         else if (buf == RR_1[2])
         {
-            current_state_RR = C_RCV_RR1;
+            current_state_R = C_RCV_RR1;
+        }
+        else if (buf == REJ_0[2])
+        {
+            current_state_R = C_RCV_REJ0;
+        }
+        else if (buf == REJ_1[2])
+        {
+            current_state_R = C_RCV_REJ1;
         }
         else
         {
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
         }
         break;
 
     case C_RCV_RR0:
         if (buf == F)
         {
-            current_state_RR = F_RCV_RR;
+            current_state_R = F_RCV_R;
         }
         else if (buf == RR_0[1] ^ RR_0[2])
         {
-            current_state_RR = BCC_RCV_RR0;
+            current_state_R = BCC_RCV_RR0;
         }
         else
         {
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
         }
         break;
 
     case C_RCV_RR1:
         if (buf == F)
         {
-            current_state_RR = F_RCV_RR;
+            current_state_R = F_RCV_R;
         }
         else if (buf == RR_1[1] ^ RR_1[2])
         {
-            current_state_RR = BCC_RCV_RR1;
+            current_state_R = BCC_RCV_RR1;
         }
         else
         {
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
+        }
+        break;
+
+    case C_RCV_REJ0:
+        if (buf == F)
+        {
+            current_state_R = F_RCV_R;
+        }
+        else if (buf == REJ_0[1] ^ REJ_0[2])
+        {
+            current_state_R = BCC_RCV_REJ0;
+        }
+        else
+        {
+            current_state_R = Start_R;
+        }
+        break;
+
+    case C_RCV_REJ1:
+        if (buf == F)
+        {
+            current_state_R = F_RCV_R;
+        }
+        else if (buf == REJ_1[1] ^ REJ_1[2])
+        {
+            current_state_R = BCC_RCV_REJ1;
+        }
+        else
+        {
+            current_state_R = Start_R;
         }
         break;
 
     case BCC_RCV_RR0:
         if (buf == F)
         {
-            current_state_RR = Stop_RR0;
+            current_state_R = Stop_RR0;
         }
         else
         {
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
         }
         break;
 
     case BCC_RCV_RR1:
         if (buf == F)
         {
-            current_state_RR = Stop_RR1;
+            current_state_R = Stop_RR1;
         }
         else
         {
-            current_state_RR = Start_RR;
+            current_state_R = Start_R;
+        }
+        break;
+
+    case BCC_RCV_REJ0:
+        if (buf == F)
+        {
+            current_state_R = Stop_REJ0;
+        }
+        else
+        {
+            current_state_R = Start_R;
+        }
+        break;
+
+    case BCC_RCV_REJ1:
+        if (buf == F)
+        {
+            current_state_R = Stop_REJ1;
+        }
+        else
+        {
+            current_state_R = Start_R;
         }
         break;
     }
@@ -421,6 +492,7 @@ void escreve()
     if (flag == msg)
     {
         printf("\nA enviar com S=%d\n", sent_RR);
+        usleep(distancia_km * 5);
         write(fd, message, length_escreve);
         if (conta < num_tries)
         {
@@ -447,10 +519,11 @@ void escreve()
 
     if (flag == clo)
     {
+
         write(fd, DISC, length_escreve);
 
         if (show)
-            printf("\nDISC enviado! Espera por DISC...\n");
+            printf("DISC enviado! Espera por DISC...\n");
 
         if (conta < num_tries)
         {
